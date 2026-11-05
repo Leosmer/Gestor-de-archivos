@@ -1,0 +1,1986 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="carpeta.png">
+    <title>Gestor y Editor Local de Documentos</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            100: '#e0effe',
+                            500: '#0284c7',
+                            600: '#0369a1',
+                            700: '#075985',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- MQTT.js para sincronización garantizada y en tiempo real entre las 3 PCs sin bloqueos -->
+    <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
+    <!-- Mammoth.js para lectura fiel y renderizado sin corrupción de documentos Word (.docx) -->
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.4.8/mammoth.browser.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+
+        /* Editor editable area styling */
+        .editor-content:empty:before {
+            content: attr(placeholder);
+            color: #9ca3af;
+            pointer-events: none;
+            display: block;
+        }
+    </style>
+</head>
+
+<body class="h-full bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors duration-200">
+    <div class="flex h-screen overflow-hidden">
+
+        <!-- BARRA LATERAL (SIDEBAR) -->
+        <aside
+            class="w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col flex-shrink-0 z-20">
+            <!-- App Logo / Title -->
+            <div class="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="rounded-lg flex items-center justify-center overflow-hidden" style="width:40px;height:40px;">
+                        <img src="logoParqueTecnologico.png" alt="Logo Parque Tecnológico" style="width:100%;height:100%;object-fit:contain;">
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-slate-900 dark:text-white leading-tight">Gestor de Archivos</h1>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Auditoria</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Seleccionar Usuario Activo (3 Personas) -->
+            <div class="p-4 bg-slate-100/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                <div class="flex items-center justify-between mb-2">
+                    <label
+                        class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Usuario Activo:
+                    </label>
+                    <button onclick="openEditProfileModal()" title="Editar nombres de los perfiles"
+                        class="text-[11px] text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-semibold flex items-center space-x-1 transition">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                        <span>Editar</span>
+                    </button>
+                </div>
+                <div class="relative">
+                    <button id="userDropdownBtn" onclick="toggleUserDropdown()"
+                        class="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg p-2 flex items-center justify-between shadow-sm hover:border-brand-500 transition">
+                        <div class="flex items-center space-x-2" id="currentUserDisplay">
+                            <!-- Se renderiza vía JS -->
+                        </div>
+                        <i class="fa-solid fa-chevron-down text-xs text-slate-400"></i>
+                    </button>
+                    <!-- Menú desplegable de usuarios -->
+                    <div id="userDropdownMenu"
+                        class="hidden absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                        <div class="py-1" id="usersListOptions">
+                            <!-- JS inserta los 3 usuarios -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navegación Principal -->
+            <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
+                <button onclick="switchTab('files')" id="nav-files"
+                    class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition bg-brand-50 dark:bg-slate-700/60 text-brand-600 dark:text-brand-400">
+                    <i class="fa-solid fa-file-lines w-5 text-center"></i>
+                    <span>Mis Documentos</span>
+                    <span id="docCountBadge"
+                        class="ml-auto bg-brand-100 dark:bg-brand-900 text-brand-700 dark:text-brand-300 text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
+                </button>
+                <button onclick="switchTab('editor')" id="nav-editor"
+                    class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition">
+                    <i class="fa-solid fa-pen-to-square w-5 text-center"></i>
+                    <span>Nuevo / Editor</span>
+                </button>
+                <button onclick="switchTab('recent')" id="nav-recent"
+                    class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition">
+                    <i class="fa-solid fa-clock-rotate-left w-5 text-center"></i>
+                    <span>Actividad Reciente</span>
+                </button>
+                <button onclick="switchTab('network')" id="nav-network"
+                    class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition">
+                    <i class="fa-solid fa-network-wired w-5 text-center"></i>
+                    <span>Conexión 3 PCs</span>
+                    <span id="peersCountBadge"
+                        class="ml-auto bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
+                </button>
+            </nav>
+
+            <!-- Acciones Rápidas & Configuración Modo Oscuro -->
+            <div class="p-4 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                <button onclick="openCreateModal()"
+                    class="w-full bg-brand-600 hover:bg-brand-700 text-white font-medium py-2 px-4 rounded-lg shadow transition flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>Crear Documento</span>
+                </button>
+
+                <div class="flex items-center justify-between pt-2">
+                    <span class="text-xs text-slate-500 dark:text-slate-400 font-medium">Tema Visual</span>
+                    <button onclick="toggleDarkMode()"
+                        class="p-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition">
+                        <i id="themeIcon" class="fa-solid fa-moon"></i>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CONTENIDO PRINCIPAL -->
+        <main class="flex-1 flex flex-col min-w-0 bg-slate-50 dark:bg-slate-900 overflow-hidden">
+
+            <!-- BARRA SUPERIOR DE BÚSQUEDA Y ESTADO -->
+            <header
+                class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-6 py-3 flex items-center justify-between flex-shrink-0">
+                <!-- Buscador global -->
+                <div class="relative w-72 md:w-96">
+                    <i
+                        class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                    <input type="text" id="searchInput" oninput="handleSearch()"
+                        placeholder="Buscar archivos por nombre o autor..."
+                        class="w-full pl-9 pr-4 py-1.5 bg-slate-100 dark:bg-slate-700/50 border border-transparent focus:border-brand-500 rounded-lg text-sm focus:outline-none dark:text-white transition">
+                </div>
+
+                <!-- Botón Cargar Archivo Local & Estado Offline -->
+                <div class="flex items-center space-x-3">
+                    <label
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg shadow cursor-pointer transition flex items-center space-x-2">
+                        <i class="fa-solid fa-upload"></i>
+                        <span class="hidden sm:inline">Importar Archivo</span>
+                        <input type="file" id="fileInput" accept=".txt,.pdf,.docx,.html,.md" class="hidden"
+                            onchange="handleFileUpload(event)">
+                    </label>
+
+                    <button onclick="openSyncModal()" title="Configuración de Red entre PCs"
+                        class="flex items-center space-x-1.5 px-3 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 rounded-full text-xs font-semibold border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition cursor-pointer">
+                        <span id="syncStatusDot" class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                        <span id="syncStatusText">Red 3 PCs Activa</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- CONTENEDOR DE PESTAÑAS DENTRO DE MAIN -->
+            <div class="flex-1 overflow-y-auto p-6 relative">
+
+                <!-- PESTAÑA 1: LISTADO DE ARCHIVOS -->
+                <section id="tab-files" class="space-y-6">
+                    <!-- Filtros y Título -->
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Archivos Locales Compartidos
+                            </h2>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">Archivos almacenados localmente para
+                                el equipo de 3 personas</p>
+                        </div>
+
+                        <!-- Filtros por Tipo y Controles de Ordenamiento -->
+                        <div class="flex flex-wrap items-center gap-2">
+                            <!-- Selector de Ordenamiento -->
+                            <div class="flex items-center space-x-1.5 bg-slate-200/80 dark:bg-slate-800 p-1 rounded-lg">
+                                <span
+                                    class="text-xs text-slate-500 dark:text-slate-400 font-medium pl-1.5 flex items-center space-x-1">
+                                    <i class="fa-solid fa-arrow-down-wide-short text-[11px]"></i>
+                                    <span class="hidden sm:inline">Ordenar:</span>
+                                </span>
+                                <select id="sortSelect" onchange="handleSortChange(this.value)"
+                                    class="bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-1 px-2.5 rounded-md shadow-sm border border-transparent focus:border-brand-500 focus:outline-none transition cursor-pointer">
+                                    <option value="date-desc">Fecha (más reciente)</option>
+                                    <option value="date-asc">Fecha (más antiguo)</option>
+                                    <option value="name-asc">Nombre (A - Z)</option>
+                                    <option value="name-desc">Nombre (Z - A)</option>
+                                    <option value="author-asc">Persona / Autor (A - Z)</option>
+                                </select>
+                            </div>
+
+                            <!-- Filtros por Tipo -->
+                            <div class="flex items-center space-x-1 bg-slate-200/80 dark:bg-slate-800 p-1 rounded-lg">
+                                <button onclick="filterDocuments('ALL')" id="filter-ALL"
+                                    class="filter-btn px-3 py-1 text-xs font-semibold rounded-md bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white">Todos</button>
+                                <button onclick="filterDocuments('INFORME')" id="filter-INFORME"
+                                    class="filter-btn px-3 py-1 text-xs font-semibold rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900">Informe</button>
+                                <button onclick="filterDocuments('MEMORANDO')" id="filter-MEMORANDO"
+                                    class="filter-btn px-3 py-1 text-xs font-semibold rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900">Memorandos</button>
+                                <button onclick="filterDocuments('OFICIO')" id="filter-OFICIO"
+                                    class="filter-btn px-3 py-1 text-xs font-semibold rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900">Oficio</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Grid / Tabla de Documentos -->
+                    <div id="documentsListContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- Se puebla dinámicamente con JavaScript -->
+                    </div>
+
+                    <!-- Estado Vacío -->
+                    <div id="emptyState"
+                        class="hidden text-center py-16 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-8">
+                        <div
+                            class="w-16 h-16 bg-brand-50 dark:bg-slate-700 text-brand-600 dark:text-brand-400 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                            <i class="fa-solid fa-folder-open"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white mb-1">No hay documentos cargados
+                        </h3>
+                        <p class="text-sm text-slate-500 dark:text-slate-400 mb-4 max-w-sm mx-auto">Crea tu primer
+                            escrito o importa un archivo local desde tu computadora para comenzar.</p>
+                        <button onclick="openCreateModal()"
+                            class="bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-700 transition">
+                            Crear Documento Ahora
+                        </button>
+                    </div>
+                </section>
+
+                <!-- PESTAÑA 2: EDITOR WYSIWYG & VISOR -->
+                <section id="tab-editor" class="hidden space-y-4 h-full flex flex-col">
+                    <!-- Top Bar del Editor -->
+                    <div
+                        class="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                        <div class="flex items-center space-x-3 flex-1 min-w-[200px]">
+                            <input type="text" id="editorTitleInput" placeholder="Título del documento..."
+                                class="text-lg font-bold bg-transparent border-b border-transparent hover:border-slate-300 focus:border-brand-500 focus:outline-none dark:text-white w-full py-1">
+                            <span id="editorDocBadge"
+                                class="bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs px-2.5 py-1 rounded-full font-semibold uppercase">DOCX</span>
+                        </div>
+
+                        <!-- Botones de Acción del Editor -->
+                        <div class="flex items-center space-x-2">
+                            <button onclick="saveCurrentDocument()"
+                                class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3.5 py-1.5 rounded-lg shadow transition flex items-center space-x-1.5">
+                                <i class="fa-solid fa-floppy-disk"></i>
+                                <span>Guardar Cambios</span>
+                            </button>
+
+                            <div class="relative inline-block text-left">
+                                <button onclick="toggleExportMenu()"
+                                    class="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium px-3 py-1.5 rounded-lg transition flex items-center space-x-1">
+                                    <i class="fa-solid fa-download"></i>
+                                    <span>Exportar</span>
+                                    <i class="fa-solid fa-chevron-down text-xs ml-1"></i>
+                                </button>
+                                <div id="exportMenu"
+                                    class="hidden absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-50 py-1">
+                                    <button onclick="exportDocument('docx')"
+                                        class="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-file-word text-blue-500"></i>
+                                        <span>Documento Word (.doc)</span>
+                                    </button>
+                                    <button onclick="exportDocument('txt')"
+                                        class="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-file-lines text-slate-400"></i>
+                                        <span>Archivo de Texto (.txt)</span>
+                                    </button>
+                                    <button onclick="exportDocument('html')"
+                                        class="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-code text-slate-400"></i>
+                                        <span>Documento HTML (.html)</span>
+                                    </button>
+                                    <button onclick="exportDocument('print')"
+                                        class="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-print text-slate-400"></i>
+                                        <span>Imprimir / Guardar PDF</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Barra de herramientas de edición (Formatting Toolbar) -->
+                    <div id="editorToolbar"
+                        class="flex flex-wrap items-center gap-1 bg-white dark:bg-slate-800 p-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm text-slate-700 dark:text-slate-300">
+                        <button onclick="execCmd('bold')" title="Negrita"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded font-bold w-8 h-8 flex items-center justify-center">B</button>
+                        <button onclick="execCmd('italic')" title="Cursiva"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded italic w-8 h-8 flex items-center justify-center">I</button>
+                        <button onclick="execCmd('underline')" title="Subrayado"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded underline w-8 h-8 flex items-center justify-center">U</button>
+                        <button onclick="execCmd('strikeThrough')" title="Tachado"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded line-through w-8 h-8 flex items-center justify-center">S</button>
+                        <div class="h-5 w-px bg-slate-300 dark:bg-slate-700 mx-1"></div>
+                        <button onclick="execCmd('formatBlock', '<h1>')" title="Título Principal"
+                            class="px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-xs font-bold">H1</button>
+                        <button onclick="execCmd('formatBlock', '<h2>')" title="Subtítulo"
+                            class="px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-xs font-bold">H2</button>
+                        <button onclick="execCmd('formatBlock', '<p>')" title="Párrafo Normal"
+                            class="px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-xs">P</button>
+                        <div class="h-5 w-px bg-slate-300 dark:bg-slate-700 mx-1"></div>
+                        <button onclick="execCmd('insertUnorderedList')" title="Lista con viñetas"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded w-8 h-8 flex items-center justify-center"><i
+                                class="fa-solid fa-list-ul text-xs"></i></button>
+                        <button onclick="execCmd('insertOrderedList')" title="Lista numerada"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded w-8 h-8 flex items-center justify-center"><i
+                                class="fa-solid fa-list-ol text-xs"></i></button>
+                        <div class="h-5 w-px bg-slate-300 dark:bg-slate-700 mx-1"></div>
+                        <button onclick="execCmd('justifyLeft')" title="Alinear a la izquierda"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded w-8 h-8 flex items-center justify-center"><i
+                                class="fa-solid fa-align-left text-xs"></i></button>
+                        <button onclick="execCmd('justifyCenter')" title="Centrar"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded w-8 h-8 flex items-center justify-center"><i
+                                class="fa-solid fa-align-center text-xs"></i></button>
+                        <button onclick="execCmd('justifyRight')" title="Alinear a la derecha"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded w-8 h-8 flex items-center justify-center"><i
+                                class="fa-solid fa-align-right text-xs"></i></button>
+                        <div class="h-5 w-px bg-slate-300 dark:bg-slate-700 mx-1"></div>
+                        <button onclick="insertHighlight()" title="Resaltar texto"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-amber-500 w-8 h-8 flex items-center justify-center"><i
+                                class="fa-solid fa-highlighter text-xs"></i></button>
+                        <button onclick="execCmd('removeFormat')" title="Limpiar Formato"
+                            class="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-red-500 w-8 h-8 flex items-center justify-center"><i
+                                class="fa-solid fa-eraser text-xs"></i></button>
+                    </div>
+
+                    <!-- Area de Hoja de Trabajo / Document Area -->
+                    <div
+                        class="flex-1 bg-slate-200 dark:bg-slate-950 p-4 md:p-8 rounded-xl overflow-y-auto flex justify-center shadow-inner">
+                        <div id="editorArea" contenteditable="true"
+                            placeholder="Comienza a escribir aquí tu documento..."
+                            class="editor-content w-full max-w-4xl min-h-[600px] bg-white text-slate-900 p-8 md:p-12 rounded-lg shadow-lg focus:outline-none leading-relaxed text-base">
+                        </div>
+                    </div>
+                </section>
+
+                <!-- PESTAÑA 3: ACTIVIDAD RECIENTE -->
+                <section id="tab-recent" class="hidden space-y-4">
+                    <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Historial de Cambios</h2>
+                    <p class="text-sm text-slate-500 dark:text-slate-400">Registro de edición local de los 3 usuarios
+                        del equipo</p>
+
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                        <ul id="activityLogList" class="divide-y divide-slate-200 dark:divide-slate-700">
+                            <!-- JS puebla la lista de actividades -->
+                        </ul>
+                    </div>
+                </section>
+
+                <!-- PESTAÑA 4: CONEXIÓN Y ALOJAMIENTO EN RED (3 PCs) -->
+                <section id="tab-network" class="hidden space-y-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Conexión y Sincronización entre 3
+                            PCs</h2>
+                        <p class="text-sm text-slate-500 dark:text-slate-400">Permite que cada una de las 3 computadoras
+                            aloje y comparta los archivos en tiempo real.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Panel de esta PC / Sala Compartida -->
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm space-y-4">
+                            <div class="flex items-center space-x-3">
+                                <div
+                                    class="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 flex items-center justify-center text-xl">
+                                    <i class="fa-solid fa-laptop"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-bold text-slate-800 dark:text-white text-sm">Esta Computadora</h3>
+                                    <p class="text-xs text-slate-500 dark:text-slate-400">Identificador en la red</p>
+                                </div>
+                            </div>
+
+                            <div class="space-y-1.5">
+                                <label
+                                    class="block text-xs font-semibold text-slate-600 dark:text-slate-400">Identificador
+                                    de tu PC:</label>
+                                <div class="flex items-center space-x-2">
+                                    <input type="text" id="myPeerIdDisplay" readonly value="Conectando..."
+                                        class="w-full font-mono text-xs px-3 py-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-200 select-all">
+                                </div>
+                                <p class="text-[11px] text-slate-400">Las 3 computadoras se sincronizan compartiendo la
+                                    misma Sala de Red.</p>
+                            </div>
+
+                            <div class="pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                                <button onclick="broadcastCurrentDocs()"
+                                    class="w-full bg-brand-600 hover:bg-brand-700 text-white font-medium py-2 px-4 rounded-lg text-xs shadow transition flex items-center justify-center space-x-2">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                                    <span>Emitir Archivos a las PCs Conectadas</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Sala Compartida (Canal Único entre las 3 PCs) -->
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm space-y-4">
+                            <div class="flex items-center space-x-3">
+                                <div
+                                    class="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xl">
+                                    <i class="fa-solid fa-users-rays"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-bold text-slate-800 dark:text-white text-sm">Sala de Red (Canal 3
+                                        PCs)</h3>
+                                    <p class="text-xs text-slate-500 dark:text-slate-400">Mismo nombre en las 3
+                                        computadoras</p>
+                                </div>
+                            </div>
+
+                            <div class="space-y-1.5">
+                                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400">Nombre de
+                                    la Sala:</label>
+                                <input type="text" id="targetPeerIdInput" value="Gestor de Archivos-equipo3"
+                                    class="w-full font-mono text-xs px-3 py-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-200 focus:outline-none focus:border-brand-500">
+                                <button onclick="connectToRoom()"
+                                    class="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-lg text-xs shadow transition flex items-center justify-center space-x-2">
+                                    <i class="fa-solid fa-plug"></i>
+                                    <span>Conectar / Unirse a la Sala</span>
+                                </button>
+                            </div>
+
+                            <div class="pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                                <p class="text-[11px] text-slate-400 leading-tight">Con solo tener el mismo nombre de
+                                    sala en las 3 PCs, se conectan y sincronizan automáticamente sin pedir códigos
+                                    complejos.</p>
+                            </div>
+                        </div>
+
+                        <!-- Respaldo / Exportación e Importación de Bóveda -->
+                        <div
+                            class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm space-y-4">
+                            <div class="flex items-center space-x-3">
+                                <div
+                                    class="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center text-xl">
+                                    <i class="fa-solid fa-database"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-bold text-slate-800 dark:text-white text-sm">Bóveda de Respaldo
+                                        Local</h3>
+                                    <p class="text-xs text-slate-500 dark:text-slate-400">Migración o transferencia
+                                        manual</p>
+                                </div>
+                            </div>
+
+                            <div class="space-y-2">
+                                <button onclick="exportVaultBackup()"
+                                    class="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium py-2 px-4 rounded-lg text-xs transition flex items-center justify-center space-x-2">
+                                    <i class="fa-solid fa-file-export"></i>
+                                    <span>Descargar Paquete Completo (.json)</span>
+                                </button>
+
+                                <label
+                                    class="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium py-2 px-4 rounded-lg text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
+                                    <i class="fa-solid fa-file-import"></i>
+                                    <span>Cargar Paquete desde otra PC</span>
+                                    <input type="file" accept=".json" class="hidden"
+                                        onchange="importVaultBackup(event)">
+                                </label>
+                            </div>
+
+                            <div class="pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                                <span class="text-[11px] text-slate-400">Sirve como alternativa sin internet o red local
+                                    usando pendrive/USB entre las 3 PCs.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Lista de PCs Conectadas -->
+                    <div
+                        class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm space-y-3">
+                        <h3 class="font-bold text-slate-800 dark:text-white text-sm flex items-center justify-between">
+                            <span>Estado de las Conexiones (PCs Enlazadas)</span>
+                            <span id="connectedNodesCount"
+                                class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">0
+                                PCs conectadas</span>
+                        </h3>
+                        <div id="connectedPeersList" class="space-y-2">
+                            <p class="text-xs text-slate-400 py-2">No hay otras computadoras conectadas en este
+                                instante. Copia tu código o conecta la ID de las otras 2 PCs.</p>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- MODAL: CREAR NUEVO DOCUMENTO -->
+    <div id="createModal"
+        class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 transition-all transform scale-100">
+            <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-file-circle-plus text-brand-600"></i>
+                    <span>Nuevo Documento Local</span>
+                </h3>
+                <button onclick="closeCreateModal()"
+                    class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form onsubmit="handleCreateDocument(event)" class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Nombre
+                        del Archivo</label>
+                    <input type="text" id="modalDocTitle" required placeholder="Ej: Reporte_Mensual.docx"
+                        class="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none dark:text-white">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Tipo de
+                        Documento</label>
+                    <select id="modalDocType" onchange="handleModalTypeChange()"
+                        class="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none dark:text-white">
+                        <option value="INFORME">Informe</option>
+                        <option value="MEMORANDO">Memorando</option>
+                        <option value="OFICIO">Oficio (Único archivo actualizable)</option>
+                    </select>
+                    <p id="oficioNotice" class="hidden text-xs text-amber-600 dark:text-amber-400 mt-1">
+                        <i class="fa-solid fa-circle-info mr-1"></i>Ya existe un archivo de Oficio. Al guardar se
+                        actualizará el documento existente.
+                    </p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Autor
+                        Inicial</label>
+                    <input type="text" id="modalDocAuthor" readonly
+                        class="w-full px-3 py-2 bg-slate-200 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-sm text-slate-600 dark:text-slate-400 cursor-not-allowed">
+                </div>
+
+                <div class="pt-4 flex items-center justify-end space-x-3">
+                    <button type="button" onclick="closeCreateModal()"
+                        class="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition">Cancelar</button>
+                    <button type="submit"
+                        class="px-4 py-2 text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-lg shadow transition">Crear
+                        e Iniciar Edición</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: VISOR DE PDF / ARCHIVO NO EDITABLE DIRECTO -->
+    <div id="viewerModal"
+        class="hidden fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700">
+            <!-- Modal Header -->
+            <div
+                class="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900">
+                <div class="flex items-center space-x-3">
+                    <span id="viewerTypeBadge"
+                        class="bg-red-500 text-white text-xs px-2.5 py-1 rounded font-bold uppercase">PDF</span>
+                    <h3 id="viewerTitle" class="text-base font-bold text-slate-900 dark:text-white">Documento</h3>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button onclick="printViewerContent()"
+                        class="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition"
+                        title="Imprimir">
+                        <i class="fa-solid fa-print"></i>
+                    </button>
+                    <button onclick="closeViewerModal()"
+                        class="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Body (Contenido del PDF o Documento) -->
+            <div class="flex-1 p-8 bg-slate-100 dark:bg-slate-950 overflow-y-auto flex justify-center">
+                <div id="viewerBody"
+                    class="bg-white text-slate-900 p-8 md:p-12 rounded-md shadow-md w-full max-w-3xl min-h-full leading-relaxed">
+                    <!-- Rendereado del contenido -->
+                </div>
+                <iframe id="viewerPdfFrame" class="hidden w-full h-full rounded-md border-0 bg-white"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: EDITAR PERFIL DE USUARIO -->
+    <div id="editProfileModal"
+        class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 transition-all transform scale-100">
+            <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-user-pen text-brand-600"></i>
+                    <span>Personalizar Perfiles del Equipo</span>
+                </h3>
+                <button onclick="closeEditProfileModal()"
+                    class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <form onsubmit="handleSaveProfiles(event)" class="p-6 space-y-4">
+                <p class="text-xs text-slate-500 dark:text-slate-400">
+                    Edita el nombre y el rol para cada uno de los 3 perfiles locales:
+                </p>
+                <div class="space-y-3" id="profileEditInputsContainer">
+                    <!-- Inyectado dinámicamente -->
+                </div>
+                <div class="pt-3 flex items-center justify-end space-x-3">
+                    <button type="button" onclick="closeEditProfileModal()"
+                        class="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition">Cancelar</button>
+                    <button type="submit"
+                        class="px-4 py-2 text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-lg shadow transition">Guardar
+                        Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- NOTIFICACIÓN TOAST LOCAL -->
+    <div id="syncModal"
+        class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 transition-all transform scale-100">
+            <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-network-wired text-brand-600"></i>
+                    <span>Alojamiento y Red entre 3 PCs</span>
+                </h3>
+                <button onclick="closeSyncModal()"
+                    class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    Este sistema permite que cualquiera de las 3 computadoras mantenga los archivos (Informe,
+                    Memorandos, Oficio) alojados localmente y sincronizados entre sí sin necesidad de configurar un
+                    servidor complejo.
+                </p>
+                <div class="bg-slate-100 dark:bg-slate-700/60 p-3 rounded-lg space-y-2 text-xs">
+                    <div class="flex justify-between items-center">
+                        <span class="font-semibold text-slate-700 dark:text-slate-300">ID de esta PC:</span>
+                        <span id="modalPeerId" class="font-mono text-brand-600 dark:text-brand-400">...</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="font-semibold text-slate-700 dark:text-slate-300">PCs Conectadas:</span>
+                        <span id="modalConnectedCount" class="font-bold text-emerald-600">0</span>
+                    </div>
+                </div>
+                <div class="pt-2 flex items-center justify-end space-x-3">
+                    <button type="button" onclick="closeSyncModal()"
+                        class="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition">Cerrar</button>
+                    <button type="button" onclick="closeSyncModal(); switchTab('network');"
+                        class="px-4 py-2 text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-lg shadow transition">Ver
+                        Panel Completo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="toast"
+        class="fixed bottom-5 right-5 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 z-50">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 dark:text-emerald-600"></i>
+        <span id="toastMessage" class="text-sm font-medium">Operación realizada con éxito</span>
+    </div>
+
+    <!-- JAVASCRIPT DE LA APLICACIÓN -->
+    <script>
+        // --- BASE DE DATOS DE LOS 3 USUARIOS INTEGRANTES ---
+        let TEAM_USERS = [
+            { id: 1, name: "Persona 1 (Carlos)", role: "Editor Principal", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Carlos", color: "bg-blue-500" },
+            { id: 2, name: "Persona 2 (María)", role: "Revisora de Documentos", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Maria", color: "bg-purple-500" },
+            { id: 3, name: "Persona 3 (Alejandro)", role: "Administrador Local", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Alejandro", color: "bg-emerald-500" }
+        ];
+
+        // Cargar perfiles personalizados si existen
+        function loadStoredTeamUsers() {
+            const stored = localStorage.getItem('Gestor de Archivos_team_users');
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    if (Array.isArray(parsed) && parsed.length === 3) {
+                        TEAM_USERS = parsed;
+                    }
+                } catch (e) {
+                    console.error("Error al leer perfiles guardados", e);
+                }
+            }
+        }
+        loadStoredTeamUsers();
+
+        // Documentos iniciales de muestra si el almacenamiento local está vacío
+        const SAMPLE_DOCS = [
+            {
+                id: "doc-1",
+                docNumber: 1,
+                title: "Informe_Actividades_Inicial.docx",
+                type: "INFORME",
+                author: "Persona 1 (Carlos)",
+                lastModified: new Date().toISOString(),
+                content: "<h2>Informe de Actividades</h2><p>Este informe registra las actividades del equipo local.</p>"
+            },
+            {
+                id: "doc-2",
+                docNumber: 2,
+                title: "Memorando_Interno_01.docx",
+                type: "MEMORANDO",
+                author: "Persona 2 (María)",
+                lastModified: new Date(Date.now() - 86400000).toISOString(),
+                content: "<h2>Memorando Interno</h2><p>Comunicación oficial para el equipo de trabajo.</p>"
+            },
+            {
+                id: "doc-3",
+                docNumber: 3,
+                title: "Oficio_General.docx",
+                type: "OFICIO",
+                author: "Persona 3 (Alejandro)",
+                lastModified: new Date(Date.now() - 172800000).toISOString(),
+                content: "<h2>Oficio General del Cliente</h2><p>Documento único oficial de oficio que se actualiza periódicamente.</p>"
+            }
+        ];
+
+        // STATE MANAGEMENT
+        let currentUser = TEAM_USERS[0];
+        let documents = [];
+        let activeDocId = null;
+        let currentFilter = 'ALL';
+        let currentSort = 'date-desc';
+        let activityLogs = [];
+
+        // RED EN TIEMPO REAL ENTRE LAS 3 PCs (MQTT Over WebSockets)
+        let mqttClient = null;
+        let currentRoomId = "Gestor de Archivos-equipo3";
+        let myClientId = null;
+        let connectedPeersMap = {}; // clientId -> timestamp
+
+        // INITIALIZATION
+        window.onload = function () {
+            loadLocalStorageData();
+            renderUserDropdown();
+            renderDocuments();
+            renderActivityLogs();
+            updateDocCount();
+            initNetworkRoom();
+        };
+
+        function initNetworkRoom() {
+            // ID único de esta PC
+            myClientId = localStorage.getItem('Gestor de Archivos_client_id');
+            if (!myClientId) {
+                myClientId = `PC-${currentUser.id}-${Math.random().toString(36).substring(2, 6)}`;
+                localStorage.setItem('Gestor de Archivos_client_id', myClientId);
+            }
+
+            const roomSaved = localStorage.getItem('Gestor de Archivos_room_id');
+            if (roomSaved) {
+                currentRoomId = roomSaved;
+                const roomInput = document.getElementById('targetPeerIdInput');
+                if (roomInput) roomInput.value = currentRoomId;
+            }
+
+            const myDisplay = document.getElementById('myPeerIdDisplay');
+            if (myDisplay) myDisplay.value = `${currentUser.name} (${myClientId})`;
+            const modalPeerId = document.getElementById('modalPeerId');
+            if (modalPeerId) modalPeerId.innerText = `${myClientId} [Sala: ${currentRoomId}]`;
+
+            connectMqttBroker();
+        }
+
+        function connectMqttBroker() {
+            if (mqttClient) {
+                try { mqttClient.end(true); } catch (e) { }
+            }
+
+            // Usamos HiveMQ WebSocket Broker (Gratis, público, con puerto SSL 8884 y fallback 8000)
+            const brokerUrl = 'wss://broker.hivemq.com:8884/mqtt';
+            showToast("Conectando a la red compartida...");
+
+            try {
+                mqttClient = mqtt.connect(brokerUrl, {
+                    clientId: myClientId,
+                    clean: true,
+                    connectTimeout: 8000,
+                    keepalive: 30
+                });
+
+                mqttClient.on('connect', () => {
+                    updateStatusConnected(true);
+                    showToast(`¡Conectado a la Sala: ${currentRoomId}!`);
+                    logActivity(`Conectado a la sala compartida: ${currentRoomId}`);
+
+                    const syncTopic = `Gestor de Archivos/rooms/${currentRoomId}/sync`;
+                    const announceTopic = `Gestor de Archivos/rooms/${currentRoomId}/presence`;
+                    const stateTopic = `Gestor de Archivos/rooms/${currentRoomId}/latest_state`;
+
+                    mqttClient.subscribe([syncTopic, announceTopic, stateTopic], (err) => {
+                        if (!err) {
+                            // Enviar anuncio de presencia
+                            publishPresence();
+                            // Solicitar a cualquier PC activa que envíe su estado más reciente
+                            requestLatestState();
+                        }
+                    });
+                });
+
+                mqttClient.on('message', (topic, payload) => {
+                    try {
+                        const msg = JSON.parse(payload.toString());
+                        // Ignorar mensajes enviados por esta misma PC
+                        if (msg.senderId === myClientId) return;
+
+                        if (topic.endsWith('/presence')) {
+                            handlePresenceMessage(msg);
+                            // Si una nueva PC se acaba de conectar (isJoining), le enviamos nuestros documentos inmediatamente
+                            if (msg.isJoining && documents.length > 0) {
+                                broadcastCurrentDocs();
+                            }
+                        } else if (topic.endsWith('/latest_state')) {
+                            // Mensaje retenido del servidor con el último estado guardado
+                            if (msg.documents && Array.isArray(msg.documents)) {
+                                mergeIncomingDocuments(msg.documents, `Bóveda Retenida (${msg.senderName || 'Nube'})`);
+                            }
+                        } else if (topic.endsWith('/sync')) {
+                            handleSyncMessage(msg);
+                        }
+                    } catch (e) {
+                        console.error("Error al procesar mensaje de red:", e);
+                    }
+                });
+
+                mqttClient.on('error', (err) => {
+                    console.warn("MQTT Error:", err);
+                    updateStatusConnected(false);
+                });
+
+                mqttClient.on('close', () => {
+                    updateStatusConnected(false);
+                });
+
+            } catch (e) {
+                console.error("Error inicializando MQTT:", e);
+                updateStatusConnected(false);
+            }
+
+            // Enviar "latido" de presencia cada 10 segundos
+            setInterval(() => {
+                if (mqttClient && mqttClient.connected) {
+                    publishPresence();
+                    cleanupInactivePeers();
+                }
+            }, 10000);
+        }
+
+        function publishPresence(isJoining = false) {
+            if (!mqttClient || !mqttClient.connected) return;
+            const announceTopic = `Gestor de Archivos/rooms/${currentRoomId}/presence`;
+            mqttClient.publish(announceTopic, JSON.stringify({
+                senderId: myClientId,
+                userName: currentUser.name,
+                userRole: currentUser.role,
+                isJoining: isJoining,
+                timestamp: Date.now()
+            }));
+        }
+
+        function requestLatestState() {
+            publishPresence(true);
+            if (!mqttClient || !mqttClient.connected) return;
+            const syncTopic = `Gestor de Archivos/rooms/${currentRoomId}/sync`;
+            mqttClient.publish(syncTopic, JSON.stringify({
+                action: 'REQUEST_LATEST_DOCS',
+                senderId: myClientId,
+                senderName: currentUser.name
+            }));
+        }
+
+        function handlePresenceMessage(msg) {
+            connectedPeersMap[msg.senderId] = {
+                name: msg.userName,
+                role: msg.userRole,
+                lastSeen: Date.now()
+            };
+            updatePeersCountUI();
+        }
+
+        function cleanupInactivePeers() {
+            const now = Date.now();
+            let changed = false;
+            for (let id in connectedPeersMap) {
+                if (now - connectedPeersMap[id].lastSeen > 35000) {
+                    delete connectedPeersMap[id];
+                    changed = true;
+                }
+            }
+            if (changed) updatePeersCountUI();
+        }
+
+        function updateStatusConnected(isConnected) {
+            const dot = document.getElementById('syncStatusDot');
+            const text = document.getElementById('syncStatusText');
+            if (isConnected) {
+                if (dot) dot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                if (text) text.innerText = `Sala: ${currentRoomId} (Activa)`;
+            } else {
+                if (dot) dot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
+                if (text) text.innerText = "Reconectando Sala...";
+            }
+        }
+
+        function updatePeersCountUI() {
+            const peerIds = Object.keys(connectedPeersMap);
+            const count = peerIds.length;
+            const badge = document.getElementById('peersCountBadge');
+            const modalCount = document.getElementById('modalConnectedCount');
+            const nodesCount = document.getElementById('connectedNodesCount');
+            const container = document.getElementById('connectedPeersList');
+
+            if (badge) badge.innerText = count;
+            if (modalCount) modalCount.innerText = count;
+            if (nodesCount) nodesCount.innerText = `${count} otras PC(s) en la sala`;
+
+            if (container) {
+                if (count === 0) {
+                    container.innerHTML = '<p class="text-xs text-slate-400 py-2">Esperando que las otras PCs abran la misma sala: <strong class="text-brand-500">' + currentRoomId + '</strong></p>';
+                } else {
+                    container.innerHTML = peerIds.map(id => {
+                        const peer = connectedPeersMap[id];
+                        return `
+                        <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-xs">
+                            <div class="flex items-center space-x-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                <span class="font-bold text-slate-800 dark:text-slate-200">${peer.name}</span>
+                                <span class="text-[10px] text-slate-400 font-mono">(${id})</span>
+                            </div>
+                            <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold uppercase">En línea y sincronizado</span>
+                        </div>
+                        `;
+                    }).join('');
+                }
+            }
+        }
+
+        function connectToRoom() {
+            const roomInput = document.getElementById('targetPeerIdInput');
+            const newRoom = (roomInput.value || '').trim();
+            if (!newRoom) {
+                alert("Por favor ingresa un nombre para la sala de las 3 PCs.");
+                return;
+            }
+            currentRoomId = newRoom;
+            localStorage.setItem('Gestor de Archivos_room_id', currentRoomId);
+            connectedPeersMap = {};
+            updatePeersCountUI();
+            connectMqttBroker();
+            showToast(`Cambiando a la sala: ${currentRoomId}...`);
+        }
+
+        function handleSyncMessage(msg) {
+            if (msg.action === 'SYNC_DOCS') {
+                mergeIncomingDocuments(msg.documents, msg.senderName);
+            } else if (msg.action === 'REQUEST_LATEST_DOCS') {
+                // Una PC que estaba desconectada o acaba de entrar pide el estado actual
+                if (documents.length > 0) {
+                    broadcastCurrentDocs();
+                }
+            } else if (msg.action === 'UPDATE_DOC') {
+                mergeSingleDoc(msg.doc, msg.senderName);
+            } else if (msg.action === 'DELETE_DOC') {
+                documents = documents.filter(d => d.id !== msg.docId);
+                saveLocalStorageDocs(false);
+                renderDocuments();
+                logActivity(`Eliminado desde otra PC: ${msg.title || ''}`);
+                showToast(`Archivo eliminado por otra PC: ${msg.title || ''}`);
+            }
+        }
+
+        function mergeIncomingDocuments(incomingDocs, fromPeerName) {
+            if (!Array.isArray(incomingDocs)) return;
+            let changesCount = 0;
+
+            incomingDocs.forEach(inDoc => {
+                const existingIdx = documents.findIndex(d => d.id === inDoc.id);
+                if (existingIdx === -1) {
+                    if (inDoc.type === 'OFICIO') {
+                        const existingOficioIdx = documents.findIndex(d => d.type === 'OFICIO');
+                        if (existingOficioIdx !== -1) {
+                            if (new Date(inDoc.lastModified) > new Date(documents[existingOficioIdx].lastModified)) {
+                                documents[existingOficioIdx] = inDoc;
+                                changesCount++;
+                            }
+                            return;
+                        }
+                    }
+                    documents.unshift(inDoc);
+                    changesCount++;
+                } else {
+                    const localDoc = documents[existingIdx];
+                    if (new Date(inDoc.lastModified) > new Date(localDoc.lastModified)) {
+                        documents[existingIdx] = inDoc;
+                        changesCount++;
+                    }
+                }
+            });
+
+            if (changesCount > 0) {
+                saveLocalStorageDocs(false);
+                renderDocuments();
+                showToast(`Sincronizados ${changesCount} documentos de ${fromPeerName || 'otra PC'}`);
+                logActivity(`Sincronizó archivos con ${fromPeerName || 'la sala'}`);
+            }
+        }
+
+        function mergeSingleDoc(doc, fromPeerName) {
+            if (doc.type === 'OFICIO') {
+                const oficioIdx = documents.findIndex(d => d.type === 'OFICIO');
+                if (oficioIdx !== -1) {
+                    documents[oficioIdx] = doc;
+                } else {
+                    documents.unshift(doc);
+                }
+            } else {
+                const idx = documents.findIndex(d => d.id === doc.id);
+                if (idx !== -1) {
+                    documents[idx] = doc;
+                } else {
+                    documents.unshift(doc);
+                }
+            }
+            saveLocalStorageDocs(false);
+            renderDocuments();
+            showToast(`Documento actualizado en tiempo real: ${doc.title}`);
+            logActivity(`Documento actualizado por ${fromPeerName}: ${doc.title}`);
+        }
+
+        function broadcastCurrentDocs() {
+            if (!mqttClient || !mqttClient.connected) {
+                return;
+            }
+            const topic = `Gestor de Archivos/rooms/${currentRoomId}/sync`;
+            const payload = JSON.stringify({
+                action: 'SYNC_DOCS',
+                senderId: myClientId,
+                senderName: currentUser.name,
+                documents: documents
+            });
+
+            // 1. Envío ordinario a las PCs que estén activas
+            mqttClient.publish(topic, payload);
+
+            // 2. Publicar con RETENEDOR (retain: true) en latest_state
+            // Esto garantiza que el broker guarde la última versión en memoria.
+            // Cuando una PC apagada se encienda y abra la página, recibirá esta versión al instante.
+            const stateTopic = `Gestor de Archivos/rooms/${currentRoomId}/latest_state`;
+            mqttClient.publish(stateTopic, JSON.stringify({
+                senderId: myClientId,
+                senderName: currentUser.name,
+                timestamp: Date.now(),
+                documents: documents
+            }), { retain: true, qos: 1 });
+
+            logActivity(`Emitió y respaldó ${documents.length} archivos en la sala`);
+        }
+
+        function broadcastDocUpdate(doc) {
+            if (!mqttClient || !mqttClient.connected) return;
+            const topic = `Gestor de Archivos/rooms/${currentRoomId}/sync`;
+            mqttClient.publish(topic, JSON.stringify({
+                action: 'UPDATE_DOC',
+                senderId: myClientId,
+                senderName: currentUser.name,
+                doc: doc
+            }));
+        }
+
+        function broadcastDocDelete(docId, title) {
+            if (!mqttClient || !mqttClient.connected) return;
+            const topic = `Gestor de Archivos/rooms/${currentRoomId}/sync`;
+            mqttClient.publish(topic, JSON.stringify({
+                action: 'DELETE_DOC',
+                senderId: myClientId,
+                senderName: currentUser.name,
+                docId: docId,
+                title: title
+            }));
+        }
+
+        function copyMyPeerId() {
+            const idInput = document.getElementById('myPeerIdDisplay');
+            if (!idInput || !idInput.value) return;
+            navigator.clipboard.writeText(idInput.value).then(() => {
+                showToast("Identificador copiado al portapapeles");
+            });
+        }
+
+        function openSyncModal() {
+            const modalPeerId = document.getElementById('modalPeerId');
+            if (modalPeerId) modalPeerId.innerText = `${myClientId} [Sala: ${currentRoomId}]`;
+            document.getElementById('syncModal').classList.remove('hidden');
+        }
+
+        function closeSyncModal() {
+            document.getElementById('syncModal').classList.add('hidden');
+        }
+
+        // BÓVEDA LOCAL / BACKUP JSON (TRANSMISIÓN VÍA USB / DISCO ENTRE PCS)
+        function exportVaultBackup() {
+            const vaultData = {
+                app: "Gestor de Archivos 3P",
+                exportDate: new Date().toISOString(),
+                exportedBy: currentUser.name,
+                documents: documents,
+                logs: activityLogs
+            };
+
+            const blob = new Blob([JSON.stringify(vaultData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Boveda_Gestor de Archivos_${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast("Bóveda exportada para compartir entre PCs");
+            logActivity("Exportó paquete de bóveda local en formato JSON");
+        }
+
+        function importVaultBackup(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (parsed && Array.isArray(parsed.documents)) {
+                        mergeIncomingDocuments(parsed.documents, "Respaldo JSON");
+                        showToast("Paquete de documentos importado con éxito");
+                        logActivity("Importó paquete de bóveda de archivos");
+                    } else {
+                        alert("El archivo no tiene el formato de bóveda de documentos válido.");
+                    }
+                } catch (err) {
+                    alert("Error al leer el archivo JSON: " + err.message);
+                }
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        // LOCAL STORAGE LOAD/SAVE
+        function loadLocalStorageData() {
+            const storedDocs = localStorage.getItem('Gestor de Archivos_docs');
+            if (storedDocs) {
+                documents = JSON.parse(storedDocs);
+                // Asegurar que documentos antiguos tengan identificador numérico y tipos acordes
+                let maxNum = 0;
+                documents.forEach(doc => {
+                    if (doc.docNumber && doc.docNumber > maxNum) maxNum = doc.docNumber;
+                });
+                documents.forEach((doc, idx) => {
+                    if (!doc.docNumber) {
+                        maxNum++;
+                        doc.docNumber = maxNum;
+                    }
+                    if (doc.type === 'PDF' || doc.type === 'DOCX' || doc.type === 'TXT') {
+                        // Migrar tipos antiguos a los nuevos si los hubiera
+                        if (doc.type === 'PDF') doc.type = 'INFORME';
+                        else if (doc.type === 'DOCX') doc.type = 'MEMORANDO';
+                        else doc.type = 'OFICIO';
+                    }
+                });
+            } else {
+                documents = SAMPLE_DOCS;
+                saveLocalStorageDocs();
+            }
+
+            const storedLogs = localStorage.getItem('Gestor de Archivos_logs');
+            if (storedLogs) {
+                activityLogs = JSON.parse(storedLogs);
+            } else {
+                activityLogs = [
+                    { user: "Persona 1 (Carlos)", action: "Inicializó el sistema con informe, memorando y oficio", date: new Date().toLocaleTimeString() }
+                ];
+            }
+        }
+
+        function getNextDocNumber() {
+            let maxNum = 0;
+            documents.forEach(doc => {
+                if (doc.docNumber && Number(doc.docNumber) > maxNum) {
+                    maxNum = Number(doc.docNumber);
+                }
+            });
+            return maxNum + 1;
+        }
+
+        function saveLocalStorageDocs(broadcast = true) {
+            localStorage.setItem('Gestor de Archivos_docs', JSON.stringify(documents));
+            updateDocCount();
+            if (broadcast && typeof broadcastCurrentDocs === 'function') {
+                broadcastCurrentDocs();
+            }
+        }
+
+        function logActivity(action) {
+            const newLog = {
+                user: currentUser.name,
+                action: action,
+                date: new Date().toLocaleTimeString() + " - " + new Date().toLocaleDateString()
+            };
+            activityLogs.unshift(newLog);
+            if (activityLogs.length > 20) activityLogs.pop();
+            localStorage.setItem('Gestor de Archivos_logs', JSON.stringify(activityLogs));
+            renderActivityLogs();
+        }
+
+        // USER MANAGEMENT
+        function renderUserDropdown() {
+            const currentDisplay = document.getElementById('currentUserDisplay');
+            currentDisplay.innerHTML = `
+                <img src="${currentUser.avatar}" class="w-7 h-7 rounded-full bg-slate-200 border border-slate-300">
+                <div class="text-left leading-tight">
+                    <p class="text-xs font-bold text-slate-800 dark:text-white">${currentUser.name}</p>
+                    <p class="text-[10px] text-slate-500 dark:text-slate-400">${currentUser.role}</p>
+                </div>
+            `;
+
+            const listOptions = document.getElementById('usersListOptions');
+            listOptions.innerHTML = TEAM_USERS.map(user => `
+                <button onclick="selectUser(${user.id})" class="w-full text-left px-3 py-2 flex items-center space-x-2 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+                    <img src="${user.avatar}" class="w-6 h-6 rounded-full bg-slate-200">
+                    <div>
+                        <p class="text-xs font-semibold text-slate-800 dark:text-slate-200">${user.name}</p>
+                        <p class="text-[10px] text-slate-400">${user.role}</p>
+                    </div>
+                </button>
+            `).join('');
+
+            document.getElementById('modalDocAuthor').value = currentUser.name;
+        }
+
+        function toggleUserDropdown() {
+            document.getElementById('userDropdownMenu').classList.toggle('hidden');
+        }
+
+        function selectUser(userId) {
+            currentUser = TEAM_USERS.find(u => u.id === userId);
+            renderUserDropdown();
+            toggleUserDropdown();
+            showToast(`Perfil cambiado a: ${currentUser.name}`);
+        }
+
+        // EDIT PROFILE MODAL
+        function openEditProfileModal() {
+            const container = document.getElementById('profileEditInputsContainer');
+            container.innerHTML = TEAM_USERS.map(user => `
+                <div class="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-xl border border-slate-200 dark:border-slate-600 flex items-center space-x-3">
+                    <img src="${user.avatar}" class="w-9 h-9 rounded-full bg-slate-200 flex-shrink-0">
+                    <div class="flex-1 space-y-1.5">
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nombre (PC ${user.id})</label>
+                            <input type="text" id="editUserName-${user.id}" value="${user.name}" required
+                                class="w-full px-2.5 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:outline-none dark:text-white">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Rol / Cargo</label>
+                            <input type="text" id="editUserRole-${user.id}" value="${user.role}" required
+                                class="w-full px-2.5 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:outline-none dark:text-white">
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('editProfileModal').classList.remove('hidden');
+        }
+
+        function closeEditProfileModal() {
+            document.getElementById('editProfileModal').classList.add('hidden');
+        }
+
+        function handleSaveProfiles(event) {
+            event.preventDefault();
+            TEAM_USERS.forEach(user => {
+                const nameInput = document.getElementById(`editUserName-${user.id}`);
+                const roleInput = document.getElementById(`editUserRole-${user.id}`);
+                if (nameInput && nameInput.value.trim()) {
+                    user.name = nameInput.value.trim();
+                    user.avatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.name)}`;
+                }
+                if (roleInput && roleInput.value.trim()) {
+                    user.role = roleInput.value.trim();
+                }
+            });
+
+            // Guardar en almacenamiento local
+            localStorage.setItem('Gestor de Archivos_team_users', JSON.stringify(TEAM_USERS));
+
+            // Actualizar usuario activo actual
+            const updatedCurrent = TEAM_USERS.find(u => u.id === currentUser.id);
+            if (updatedCurrent) currentUser = updatedCurrent;
+
+            renderUserDropdown();
+            closeEditProfileModal();
+            showToast("Perfiles actualizados con éxito");
+            logActivity(`Actualizó los nombres de los perfiles del equipo`);
+
+            // Notificar cambio en la red si está conectado
+            if (typeof publishPresence === 'function') {
+                publishPresence();
+            }
+        }
+
+        // TABS SWITCHING
+        function switchTab(tabName) {
+            ['files', 'editor', 'recent', 'network'].forEach(tab => {
+                const targetTab = document.getElementById(`tab-${tab}`);
+                if (targetTab) targetTab.classList.add('hidden');
+                const navBtn = document.getElementById(`nav-${tab}`);
+                if (navBtn) {
+                    navBtn.classList.remove('bg-brand-50', 'dark:bg-slate-700/60', 'text-brand-600', 'dark:text-brand-400');
+                    navBtn.classList.add('text-slate-600', 'dark:text-slate-300');
+                }
+            });
+
+            const activeTab = document.getElementById(`tab-${tabName}`);
+            if (activeTab) activeTab.classList.remove('hidden');
+            const activeNavBtn = document.getElementById(`nav-${tabName}`);
+            if (activeNavBtn) {
+                activeNavBtn.classList.add('bg-brand-50', 'dark:bg-slate-700/60', 'text-brand-600', 'dark:text-brand-400');
+            }
+            if (tabName === 'network') {
+                updatePeerStatusUI();
+            }
+        }
+
+        // SORTING FUNCTIONALITY
+        function handleSortChange(sortValue) {
+            currentSort = sortValue;
+            renderDocuments();
+        }
+
+        function sortDocumentList(list) {
+            return list.slice().sort((a, b) => {
+                if (currentSort === 'date-desc') {
+                    return new Date(b.lastModified) - new Date(a.lastModified);
+                } else if (currentSort === 'date-asc') {
+                    return new Date(a.lastModified) - new Date(b.lastModified);
+                } else if (currentSort === 'name-asc') {
+                    return (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' });
+                } else if (currentSort === 'name-desc') {
+                    return (b.title || '').localeCompare(a.title || '', undefined, { sensitivity: 'base' });
+                } else if (currentSort === 'author-asc') {
+                    return (a.author || '').localeCompare(b.author || '', undefined, { sensitivity: 'base' });
+                }
+                return 0;
+            });
+        }
+
+        // RENDER DOCUMENTS LIST
+        function renderDocuments() {
+            const container = document.getElementById('documentsListContainer');
+            const emptyState = document.getElementById('emptyState');
+
+            const filtered = documents.filter(doc => {
+                if (currentFilter === 'ALL') return true;
+                return doc.type === currentFilter;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            const sortedList = sortDocumentList(filtered);
+
+            container.innerHTML = sortedList.map(doc => {
+                const badgeColor = doc.type === 'INFORME' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400 border-blue-200' :
+                    doc.type === 'MEMORANDO' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 border-amber-200' :
+                        'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 border-emerald-200';
+
+                const iconClass = doc.type === 'INFORME' ? 'fa-file-lines text-blue-500' :
+                    doc.type === 'MEMORANDO' ? 'fa-envelope-open-text text-amber-500' :
+                        'fa-stamp text-emerald-500';
+
+                const docNumFormatted = String(doc.docNumber || 0).padStart(3, '0');
+                const formattedDate = new Date(doc.lastModified).toLocaleDateString() + ' ' + new Date(doc.lastModified).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                return `
+                <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-start justify-between mb-3">
+                            <div class="flex items-center space-x-3">
+                                <i class="fa-solid ${iconClass} text-2xl"></i>
+                                <div>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="inline-block bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-[11px] font-mono font-bold px-1.5 py-0.5 rounded">#${docNumFormatted}</span>
+                                        <h3 class="font-bold text-slate-800 dark:text-white text-sm line-clamp-1">${doc.title}</h3>
+                                    </div>
+                                    <span class="inline-block border text-[10px] font-bold px-2 py-0.5 rounded ${badgeColor} mt-1">${doc.type}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="text-xs text-slate-500 dark:text-slate-400 space-y-1 mb-4">
+                            <p><i class="fa-solid fa-user text-[10px] mr-1"></i> Autor: <span class="font-medium text-slate-700 dark:text-slate-300">${doc.author}</span></p>
+                            <p><i class="fa-solid fa-clock text-[10px] mr-1"></i> Editado: ${formattedDate}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between border-t border-slate-100 dark:border-slate-700/60 pt-3 mt-2">
+                        <button onclick="openDocument('${doc.id}')" class="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline flex items-center space-x-1">
+                            <i class="fa-solid fa-folder-open"></i>
+                            <span>Abrir / Editar</span>
+                        </button>
+
+                        <div class="flex items-center space-x-2">
+                            <!-- Botón de Exportación Rápida -->
+                            <div class="relative inline-block text-left">
+                                <button onclick="toggleCardExportMenu('${doc.id}', event)" class="text-xs text-slate-500 hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-400 p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition flex items-center space-x-1" title="Exportar este archivo">
+                                    <i class="fa-solid fa-download"></i>
+                                    <span class="hidden sm:inline text-[11px] font-medium">Exportar</span>
+                                    <i class="fa-solid fa-chevron-down text-[9px]"></i>
+                                </button>
+                                <div id="cardExportMenu-${doc.id}" class="hidden absolute right-0 bottom-full mb-1 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-30 py-1">
+                                    <button onclick="exportSingleDoc('${doc.id}', 'docx')" class="w-full text-left px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-file-word text-blue-500"></i>
+                                        <span>Word (.doc)</span>
+                                    </button>
+                                    <button onclick="exportSingleDoc('${doc.id}', 'txt')" class="w-full text-left px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-file-lines text-slate-400"></i>
+                                        <span>Texto (.txt)</span>
+                                    </button>
+                                    <button onclick="exportSingleDoc('${doc.id}', 'html')" class="w-full text-left px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-code text-emerald-500"></i>
+                                        <span>HTML (.html)</span>
+                                    </button>
+                                    <button onclick="exportSingleDoc('${doc.id}', 'print')" class="w-full text-left px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center space-x-2">
+                                        <i class="fa-solid fa-print text-amber-500"></i>
+                                        <span>Imprimir / PDF</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <button onclick="deleteDocument('${doc.id}')" class="text-xs text-slate-400 hover:text-red-500 transition p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700" title="Eliminar">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function filterDocuments(type) {
+            currentFilter = type;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('bg-white', 'dark:bg-slate-700', 'shadow-sm', 'text-slate-800', 'dark:text-white');
+                btn.classList.add('text-slate-600', 'dark:text-slate-400');
+            });
+            const activeBtn = document.getElementById(`filter-${type}`);
+            activeBtn.classList.add('bg-white', 'dark:bg-slate-700', 'shadow-sm', 'text-slate-800', 'dark:text-white');
+            renderDocuments();
+        }
+
+        function updateDocCount() {
+            document.getElementById('docCountBadge').innerText = documents.length;
+        }
+
+        // CREATE NEW DOCUMENT
+        function openCreateModal() {
+            document.getElementById('createModal').classList.remove('hidden');
+            handleModalTypeChange();
+        }
+
+        function closeCreateModal() {
+            document.getElementById('createModal').classList.add('hidden');
+        }
+
+        function handleModalTypeChange() {
+            const type = document.getElementById('modalDocType').value;
+            const notice = document.getElementById('oficioNotice');
+            const titleInput = document.getElementById('modalDocTitle');
+            if (type === 'OFICIO') {
+                const existingOficio = documents.find(d => d.type === 'OFICIO');
+                if (existingOficio) {
+                    notice.classList.remove('hidden');
+                    titleInput.value = existingOficio.title;
+                } else {
+                    notice.classList.add('hidden');
+                    if (!titleInput.value) titleInput.value = "Oficio_Principal.docx";
+                }
+            } else {
+                notice.classList.add('hidden');
+            }
+        }
+
+        function handleCreateDocument(e) {
+            e.preventDefault();
+            const title = document.getElementById('modalDocTitle').value;
+            const type = document.getElementById('modalDocType').value;
+
+            // En oficio solo habrá un único archivo el cual se actualizará con el tiempo
+            if (type === 'OFICIO') {
+                const existingOficioIndex = documents.findIndex(d => d.type === 'OFICIO');
+                if (existingOficioIndex !== -1) {
+                    const existingOficio = documents[existingOficioIndex];
+                    existingOficio.title = title.includes('.') ? title : `${title}.docx`;
+                    existingOficio.author = currentUser.name;
+                    existingOficio.lastModified = new Date().toISOString();
+                    saveLocalStorageDocs();
+                    renderDocuments();
+                    closeCreateModal();
+                    logActivity(`Actualizó el oficio ${existingOficio.title}`);
+                    showToast("Oficio único actualizado con éxito");
+                    openDocument(existingOficio.id);
+                    return;
+                }
+            }
+
+            const docNumber = getNextDocNumber();
+            const ext = type === 'INFORME' ? '.pdf' : '.docx';
+            const cleanTitle = title.includes('.') ? title : `${title}${ext}`;
+
+            const newDoc = {
+                id: "doc-" + Date.now(),
+                docNumber: docNumber,
+                title: cleanTitle,
+                type: type,
+                author: currentUser.name,
+                lastModified: new Date().toISOString(),
+                content: `<h2>${cleanTitle}</h2><p>Documento de tipo <b>${type}</b> (N° ${String(docNumber).padStart(3, '0')}) creado por ${currentUser.name}.</p>`
+            };
+
+            documents.unshift(newDoc);
+            saveLocalStorageDocs();
+            renderDocuments();
+            closeCreateModal();
+            logActivity(`Creó el documento [N° ${docNumber}] ${newDoc.title}`);
+            showToast(`Nuevo documento N° ${docNumber} creado`);
+            openDocument(newDoc.id);
+        }
+
+        // OPEN & EDIT DOCUMENT
+        function openDocument(docId) {
+            const doc = documents.find(d => d.id === docId);
+            if (!doc) return;
+
+            activeDocId = doc.id;
+
+            const docNumStr = doc.docNumber ? `[N° ${String(doc.docNumber).padStart(3, '0')}] ` : '';
+            const isPdf = (doc.title && doc.title.toLowerCase().endsWith('.pdf')) || doc.type === 'PDF';
+
+            if (isPdf) {
+                // Si es formato PDF abre visor
+                document.getElementById('viewerTitle').innerText = `${docNumStr}${doc.title}`;
+                document.getElementById('viewerTypeBadge').innerText = doc.type;
+
+                const viewerBody = document.getElementById('viewerBody');
+                const viewerPdfFrame = document.getElementById('viewerPdfFrame');
+
+                if (doc.fileData && doc.fileData.startsWith('data:application/pdf')) {
+                    // Renderizado PDF nativo de alta fidelidad desde Data/Blob
+                    try {
+                        const parts = doc.fileData.split(',');
+                        const bstr = atob(parts[1]);
+                        let n = bstr.length;
+                        const u8arr = new Uint8Array(n);
+                        while (n--) {
+                            u8arr[n] = bstr.charCodeAt(n);
+                        }
+                        const blob = new Blob([u8arr], { type: 'application/pdf' });
+                        const blobUrl = URL.createObjectURL(blob);
+                        viewerPdfFrame.src = blobUrl;
+                        viewerPdfFrame.classList.remove('hidden');
+                        viewerBody.classList.add('hidden');
+                    } catch (e) {
+                        viewerPdfFrame.classList.add('hidden');
+                        viewerBody.classList.remove('hidden');
+                        viewerBody.innerHTML = doc.content || '<p class="text-slate-400">Sin contenido previo.</p>';
+                    }
+                } else {
+                    viewerPdfFrame.classList.add('hidden');
+                    viewerBody.classList.remove('hidden');
+                    viewerBody.innerHTML = doc.content || '<p class="text-slate-400">Sin contenido previo.</p>';
+                }
+
+                document.getElementById('viewerModal').classList.remove('hidden');
+                logActivity(`Visualizó el archivo ${doc.title}`);
+            } else {
+                // Abre en el Editor WYSIWYG
+                document.getElementById('editorTitleInput').value = doc.title;
+                document.getElementById('editorDocBadge').innerText = `${docNumStr}${doc.type}`;
+                document.getElementById('editorArea').innerHTML = doc.content || '';
+                switchTab('editor');
+            }
+        }
+
+        function closeViewerModal() {
+            document.getElementById('viewerModal').classList.add('hidden');
+            const viewerPdfFrame = document.getElementById('viewerPdfFrame');
+            if (viewerPdfFrame) viewerPdfFrame.src = '';
+        }
+
+        // SAVE DOCUMENT IN EDITOR
+        function saveCurrentDocument() {
+            if (!activeDocId) {
+                // Si no hay un id activo, creamos uno
+                const title = document.getElementById('editorTitleInput').value || "Nuevo_Informe.docx";
+                const newDocNumber = getNextDocNumber();
+                const newDoc = {
+                    id: "doc-" + Date.now(),
+                    docNumber: newDocNumber,
+                    title: title,
+                    type: "INFORME",
+                    author: currentUser.name,
+                    lastModified: new Date().toISOString(),
+                    content: document.getElementById('editorArea').innerHTML
+                };
+                documents.unshift(newDoc);
+                activeDocId = newDoc.id;
+            } else {
+                const docIndex = documents.findIndex(d => d.id === activeDocId);
+                if (docIndex !== -1) {
+                    documents[docIndex].title = document.getElementById('editorTitleInput').value;
+                    documents[docIndex].content = document.getElementById('editorArea').innerHTML;
+                    documents[docIndex].lastModified = new Date().toISOString();
+                    documents[docIndex].author = currentUser.name;
+                }
+            }
+
+            saveLocalStorageDocs();
+            renderDocuments();
+            logActivity(`Guardó cambios en ${document.getElementById('editorTitleInput').value}`);
+            showToast("Guardado con éxito en el almacenamiento local");
+        }
+
+        // DELETE DOCUMENT
+        function deleteDocument(docId) {
+            const doc = documents.find(d => d.id === docId);
+            if (confirm(`¿Estás seguro de que deseas eliminar el archivo local "${doc.title}"?`)) {
+                documents = documents.filter(d => d.id !== docId);
+                saveLocalStorageDocs(false);
+                broadcastDocDelete(docId, doc.title);
+                renderDocuments();
+                logActivity(`Eliminó el archivo ${doc.title}`);
+                showToast("Archivo eliminado localmente");
+            }
+        }
+
+        // IMPORT FILE FROM LOCAL DISK
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const lowerName = file.name.toLowerCase();
+            let detectedType = 'INFORME';
+            if (lowerName.includes('memorando') || lowerName.includes('memo')) {
+                detectedType = 'MEMORANDO';
+            } else if (lowerName.includes('oficio')) {
+                detectedType = 'OFICIO';
+            }
+
+            // Manejador común para registrar o actualizar el documento
+            function finalizeFileImport(parsedHtml, dataUri) {
+                if (detectedType === 'OFICIO') {
+                    const existingOficio = documents.find(d => d.type === 'OFICIO');
+                    if (existingOficio) {
+                        existingOficio.title = file.name;
+                        existingOficio.author = currentUser.name;
+                        existingOficio.lastModified = new Date().toISOString();
+                        existingOficio.content = parsedHtml;
+                        if (dataUri) existingOficio.fileData = dataUri;
+                        saveLocalStorageDocs();
+                        renderDocuments();
+                        logActivity(`Actualizó el oficio único con archivo importado: ${file.name}`);
+                        showToast(`Oficio único actualizado con ${file.name}`);
+                        openDocument(existingOficio.id);
+                        event.target.value = '';
+                        return;
+                    }
+                }
+
+                const docNumber = getNextDocNumber();
+                const newDoc = {
+                    id: "doc-" + Date.now(),
+                    docNumber: docNumber,
+                    title: file.name,
+                    type: detectedType,
+                    author: currentUser.name,
+                    lastModified: new Date().toISOString(),
+                    content: parsedHtml,
+                    fileData: dataUri || null
+                };
+
+                documents.unshift(newDoc);
+                saveLocalStorageDocs();
+                renderDocuments();
+                logActivity(`Importó el archivo [N° ${docNumber}] ${file.name}`);
+                showToast(`Archivo [N° ${docNumber}] ${file.name} importado con éxito`);
+                event.target.value = '';
+                openDocument(newDoc.id);
+            }
+
+            if (lowerName.endsWith('.docx')) {
+                // Conversión de Word .docx real a HTML limpio estructurado
+                const arrayReader = new FileReader();
+                arrayReader.onload = function (e) {
+                    const arrayBuffer = e.target.result;
+                    if (window.mammoth) {
+                        mammoth.convertToHtml({ arrayBuffer: arrayBuffer })
+                            .then(function (result) {
+                                const html = result.value || `<h2>${file.name}</h2><p>Documento Word cargado correctamente.</p>`;
+                                finalizeFileImport(html, null);
+                            })
+                            .catch(function (err) {
+                                console.warn("Mammoth error, fallback:", err);
+                                finalizeFileImport(`<h2>${file.name}</h2><p>Documento Word importado.</p>`, null);
+                            });
+                    } else {
+                        finalizeFileImport(`<h2>${file.name}</h2><p>Documento Word importado.</p>`, null);
+                    }
+                };
+                arrayReader.readAsArrayBuffer(file);
+
+            } else if (lowerName.endsWith('.pdf')) {
+                // Los archivos PDF se leen como DataURL / Blob para que el visor PDF del navegador lo muestre intacto
+                const dataReader = new FileReader();
+                dataReader.onload = function (e) {
+                    const dataUri = e.target.result;
+                    const htmlPreview = `<h2>${file.name}</h2><p>Documento PDF cargado y listo para lectura.</p>`;
+                    finalizeFileImport(htmlPreview, dataUri);
+                };
+                dataReader.readAsDataURL(file);
+
+            } else {
+                // Archivos de texto (.txt, .md, .html)
+                const textReader = new FileReader();
+                textReader.onload = function (e) {
+                    const content = e.target.result;
+                    const html = lowerName.endsWith('.txt') || lowerName.endsWith('.md')
+                        ? `<pre class="whitespace-pre-wrap">${content}</pre>`
+                        : content;
+                    finalizeFileImport(html, null);
+                };
+                textReader.readAsText(file);
+            }
+        }
+
+        // EXPORT DOCUMENT
+        function toggleExportMenu() {
+            document.getElementById('exportMenu').classList.toggle('hidden');
+        }
+
+        function toggleCardExportMenu(docId, event) {
+            if (event) event.stopPropagation();
+            // Cerrar otros menús abiertos
+            document.querySelectorAll('[id^="cardExportMenu-"]').forEach(menu => {
+                if (menu.id !== `cardExportMenu-${docId}`) menu.classList.add('hidden');
+            });
+            const menu = document.getElementById(`cardExportMenu-${docId}`);
+            if (menu) menu.classList.toggle('hidden');
+        }
+
+        // Cerrar menús de exportación flotantes al hacer clic fuera
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('[id^="cardExportMenu-"]') && !e.target.closest('button[onclick*="toggleCardExportMenu"]')) {
+                document.querySelectorAll('[id^="cardExportMenu-"]').forEach(m => m.classList.add('hidden'));
+            }
+        });
+
+        function exportSingleDoc(docId, format) {
+            const doc = documents.find(d => d.id === docId);
+            if (!doc) return;
+            const menu = document.getElementById(`cardExportMenu-${docId}`);
+            if (menu) menu.classList.add('hidden');
+            performFileDownload(doc.title, doc.content, format);
+        }
+
+        function exportDocument(format) {
+            const title = document.getElementById('editorTitleInput').value || "Documento";
+            const content = document.getElementById('editorArea').innerHTML;
+            toggleExportMenu();
+            performFileDownload(title, content, format);
+        }
+
+        function performFileDownload(title, contentHtml, format) {
+            const baseName = title.replace(/\.[^/.]+$/, "");
+
+            if (format === 'print') {
+                const printWindow = window.open('', '', 'height=600,width=800');
+                printWindow.document.write(`<!DOCTYPE html><html><head><title>${baseName}</title><style>body{font-family:sans-serif;padding:30px;line-height:1.6;}</style></head><body>${contentHtml}</body></html>`);
+                printWindow.document.close();
+                printWindow.print();
+                return;
+            }
+
+            let mimeType = 'text/plain;charset=utf-8';
+            let extension = '.txt';
+            let fileContent = '';
+
+            if (format === 'docx') {
+                // Formato HTML compatible con Microsoft Word (.doc / .docx)
+                mimeType = 'application/msword;charset=utf-8';
+                extension = '.doc';
+                fileContent = `
+                    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+                    <head><meta charset='utf-8'><title>${baseName}</title>
+                    <style>
+                        body { font-family: 'Calibri', 'Arial', sans-serif; font-size: 11pt; line-height: 1.5; padding: 20px; }
+                        h1 { font-size: 18pt; color: #1e3a8a; }
+                        h2 { font-size: 14pt; color: #1e3a8a; }
+                        p { margin-bottom: 8pt; }
+                        table { border-collapse: collapse; width: 100%; }
+                        th, td { border: 1px solid #999; padding: 6px; }
+                    </style>
+                    </head>
+                    <body>
+                        ${contentHtml}
+                    </body>
+                    </html>
+                `;
+            } else if (format === 'html') {
+                mimeType = 'text/html;charset=utf-8';
+                extension = '.html';
+                fileContent = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>${baseName}</title><style>body{font-family:sans-serif;padding:30px;line-height:1.6;}</style></head><body>${contentHtml}</body></html>`;
+            } else {
+                // Modo texto plano
+                mimeType = 'text/plain;charset=utf-8';
+                extension = '.txt';
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = contentHtml;
+                fileContent = tempDiv.innerText || tempDiv.textContent || '';
+            }
+
+            const blob = new Blob([fileContent], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${baseName}${extension}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast(`Documento descargado como ${extension}`);
+        }
+
+        // WYSIWYG EXEC COMMANDS
+        function execCmd(command, value = null) {
+            document.execCommand(command, false, value);
+        }
+
+        function insertHighlight() {
+            document.execCommand('backColor', false, '#fef08a');
+        }
+
+        // SEARCH FUNCTIONALITY
+        function handleSearch() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = documents.filter(doc =>
+                doc.title.toLowerCase().includes(query) || doc.author.toLowerCase().includes(query)
+            );
+
+            const container = document.getElementById('documentsListContainer');
+            if (filtered.length === 0) {
+                container.innerHTML = `<p class="col-span-3 text-center py-8 text-slate-400">No se encontraron archivos que coincidan con "${query}"</p>`;
+                return;
+            }
+
+            // Temporarily render filtered
+            const backupDocs = documents;
+            documents = filtered;
+            renderDocuments();
+            documents = backupDocs;
+        }
+
+        // RENDER ACTIVITY LOGS
+        function renderActivityLogs() {
+            const logList = document.getElementById('activityLogList');
+            if (activityLogs.length === 0) {
+                logList.innerHTML = '<li class="p-4 text-sm text-slate-400 text-center">No hay actividad reciente registrada.</li>';
+                return;
+            }
+
+            logList.innerHTML = activityLogs.map(log => `
+                <li class="p-4 flex items-center justify-between text-sm">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-500 font-bold text-xs">
+                            ${log.user.charAt(0)}
+                        </div>
+                        <div>
+                            <p class="text-slate-800 dark:text-slate-200 font-medium">${log.action}</p>
+                            <p class="text-xs text-slate-400">Por: ${log.user}</p>
+                        </div>
+                    </div>
+                    <span class="text-xs text-slate-400 font-mono">${log.date}</span>
+                </li>
+            `).join('');
+        }
+
+        // DARK MODE TOGGLE
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+            const icon = document.getElementById('themeIcon');
+            if (document.documentElement.classList.contains('dark')) {
+                icon.classList.remove('fa-moon');
+                icon.classList.add('fa-sun');
+            } else {
+                icon.classList.remove('fa-sun');
+                icon.classList.add('fa-moon');
+            }
+        }
+
+        // TOAST NOTIFICATION
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').innerText = message;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        function printViewerContent() {
+            const content = document.getElementById('viewerBody').innerHTML;
+            const printWindow = window.open('', '', 'height=600,width=800');
+            printWindow.document.write(`<html><head><title>Imprimir Documento</title></head><body style="font-family:sans-serif;padding:30px;">${content}</body></html>`);
+            printWindow.document.close();
+            printWindow.print();
+        }
+    </script>
+
+    <!-- Footer Copyright -->
+    <footer class="w-full mt-auto py-3 px-6 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-center">
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+            <i class="fa-regular fa-copyright mr-1"></i>
+            <span id="footer-year"></span>
+            <span class="font-semibold text-gray-700 dark:text-gray-300">Leosmer Villegas &amp; Juan Lyon</span>
+            &mdash; Todos los derechos reservados.
+            <span class="ml-2 italic opacity-70">Gestor Local de Documentos</span>
+        </p>
+    </footer>
+    <script>document.getElementById('footer-year').textContent = new Date().getFullYear();</script>
+
+</body>
+
+</html>
